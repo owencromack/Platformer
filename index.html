@@ -1,40 +1,376 @@
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ipad test</title>
-  <style>
-    body {
-      background: #172554;
-      color: white;
-      font-family: sans-serif;
-      text-align: center;
-      padding: 30px 12px;
-    }
-    button {
-      font-size: 22px;
-      padding: 16px 24px;
-      border: 0;
-      border-radius: 12px;
-      background: #38bdf8;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Skybound Adventure</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: #10234a; color: white;
+  font-family: system-ui, sans-serif; text-align: center;
+  overflow-x: hidden; touch-action: manipulation;
+}
+h1 { margin: 12px 0 4px; font-size: 27px; }
+#hud { display:flex; justify-content:space-around; gap:8px;
+  padding:8px; font-weight:bold; flex-wrap:wrap; }
+#game {
+  display:block; width:100%; max-width:960px; height:auto;
+  margin:auto; background:#75d8ff; border:3px solid #fff;
+  border-radius:12px; touch-action:none;
+}
+#controls {
+  max-width:700px; margin:12px auto; padding:0 12px;
+  display:flex; justify-content:space-between; gap:12px;
+}
+.group { display:flex; gap:10px; }
+button {
+  border:0; border-radius:15px; padding:15px 19px;
+  background:#ffca55; color:#26304e; font-size:20px;
+  font-weight:900; box-shadow:0 4px #bd7e2a;
+  touch-action:none; user-select:none;
+}
+button:active { transform:translateY(3px); box-shadow:none; }
+#message { min-height:26px; color:#ffe18a; font-weight:bold; }
+.small { font-size:13px; color:#c7ddff; margin:8px; }
+</style>
 </head>
 <body>
-  <h1>Test</h1>
-  <p id="score">Score: 0</p>
-  <button onclick="scoreUp()">Tap to Score</button>
+<h1>☁️ Skybound Adventure</h1>
+<div id="hud">
+  <span id="coins">🪙 Coins: 0</span>
+  <span id="lives">❤️ Lives: 3</span>
+  <span id="level">🌎 Level: 1</span>
+</div>
+<canvas id="game" width="960" height="540"></canvas>
+<div id="message">Collect coins and reach the green flag!</div>
+<div id="controls">
+  <div class="group">
+    <button id="left" aria-label="Move left">◀</button>
+    <button id="right" aria-label="Move right">▶</button>
+  </div>
+  <div class="group">
+    <button id="jump" aria-label="Jump">⬆ JUMP</button>
+    <button id="restart" aria-label="Restart">↻</button>
+  </div>
+</div>
+<p class="small">Move with ◀ ▶ · Jump with ⬆ or Space · Avoid purple slimes!</p>
 
-  <script>
-    let score = 0;
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+const hudCoins = document.getElementById("coins");
+const hudLives = document.getElementById("lives");
+const hudLevel = document.getElementById("level");
+const message = document.getElementById("message");
 
-    function scoreUp() {
-      score++;
-      document.getElementById("score").textContent =
-        "Score: " + score;
+let keys = {left:false,right:false};
+let player, platforms, coins, enemies, goal, camera;
+let totalCoins = 0, lives = 3, stage = 1;
+let won = false, gameOver = false, invincible = 0;
+let last = 0;
+
+function makeLevel(n) {
+  stage = n;
+  const groundY = 465;
+  platforms = [
+    {x:0,y:groundY,w:330,h:100},
+    {x:400,y:410,w:150,h:22},
+    {x:610,y:345,w:145,h:22},
+    {x:820,y:395,w:140,h:22},
+    {x:1040,y:330,w:155,h:22},
+    {x:1280,y:390,w:150,h:22},
+    {x:1500,y:320,w:160,h:22},
+    {x:1750,y:390,w:180,h:22},
+    {x:1990,y:465,w:390,h:100}
+  ];
+  // Higher levels add moving platforms.
+  if(n >= 2) {
+    platforms.push({x:900,y:260,w:120,h:20,moving:true,
+      baseY:260,phase:0});
+    platforms.push({x:1690,y:255,w:130,h:20,moving:true,
+      baseY:255,phase:2});
+  }
+  if(n >= 3) {
+    platforms.push({x:1160,y:235,w:120,h:20,moving:true,
+      baseY:235,phase:1});
+  }
+
+  coins = [
+    [180,420],[275,415],[450,365],[510,365],
+    [665,300],[720,300],[875,350],[1090,285],
+    [1150,285],[1330,345],[1550,275],[1610,275],
+    [1780,345],[2050,420],[2150,420]
+  ].map(([x,y],i)=>({x:x+(n-1)*8,y:y-(n-1)*5,
+      got:false,bob:i}));
+
+  enemies = [
+    {x:230,y:435,min:190,max:300,v:1.4+n*.35},
+    {x:680,y:315,min:625,max:735,v:-1.2-n*.25},
+    {x:1370,y:360,min:1295,max:1405,v:1.5+n*.3},
+    {x:1800,y:360,min:1760,max:1890,v:-1.3-n*.2}
+  ];
+  goal = {x:2260,y:395};
+  player = {x:55,y:390,w:30,h:42,vx:0,vy:0,
+    grounded:false,face:1};
+  camera = 0;
+  won = false; gameOver = false; invincible = 0;
+  message.textContent = "Level "+n+" — Find the green flag!";
+  updateHUD();
+}
+
+function updateHUD() {
+  hudCoins.textContent = "🪙 Coins: "+totalCoins;
+  hudLives.textContent = "❤️ Lives: "+lives;
+  hudLevel.textContent = "🌎 Level: "+stage+"/3";
+}
+
+function resetGame() {
+  totalCoins = 0; lives = 3; makeLevel(1);
+}
+document.getElementById("restart").addEventListener("click", resetGame);
+
+function bindButton(id, key) {
+  const el = document.getElementById(id);
+  const down = e => { e.preventDefault(); keys[key]=true; };
+  const up = e => { e.preventDefault(); keys[key]=false; };
+  el.addEventListener("pointerdown", down);
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", up);
+  el.addEventListener("lostpointercapture", up);
+  el.addEventListener("contextmenu", e=>e.preventDefault());
+}
+bindButton("left","left");
+bindButton("right","right");
+
+function jump() {
+  if(player && player.grounded && !won && !gameOver) {
+    player.vy = -12.8;
+    player.grounded = false;
+  }
+}
+document.getElementById("jump").addEventListener("pointerdown", e=>{
+  e.preventDefault(); jump();
+});
+window.addEventListener("keydown", e=>{
+  if(["ArrowLeft","ArrowRight","ArrowUp"," ","a","d","w"].includes(e.key))
+    e.preventDefault();
+  if(e.key==="ArrowLeft" || e.key==="a") keys.left=true;
+  if(e.key==="ArrowRight" || e.key==="d") keys.right=true;
+  if(e.key==="ArrowUp" || e.key===" " || e.key==="w") {
+    if(!e.repeat) jump();
+  }
+  if(e.key==="r") resetGame();
+});
+window.addEventListener("keyup", e=>{
+  if(e.key==="ArrowLeft" || e.key==="a") keys.left=false;
+  if(e.key==="ArrowRight" || e.key==="d") keys.right=false;
+});
+
+function overlap(a,b) {
+  return a.x < b.x+b.w && a.x+a.w > b.x &&
+         a.y < b.y+b.h && a.y+a.h > b.y;
+}
+
+function loseLife() {
+  if(invincible>0 || won || gameOver) return;
+  lives--;
+  updateHUD();
+  if(lives<=0) {
+    gameOver=true;
+    message.textContent="Game over! Tap ↻ to try again.";
+  } else {
+    player.x=Math.max(25,camera+45);
+    player.y=300; player.vx=0; player.vy=0;
+    invincible=100;
+    message.textContent="Oops! Watch out for slimes.";
+  }
+}
+
+function update() {
+  if(won || gameOver) return;
+  if(invincible>0) invincible--;
+
+  player.vx = keys.left ? -4.2 : keys.right ? 4.2 : 0;
+  if(player.vx!==0) player.face=Math.sign(player.vx);
+  player.x += player.vx;
+  player.x = Math.max(0,player.x);
+
+  // Gravity and jumping.
+  const oldBottom = player.y+player.h;
+  player.vy += 0.58;
+  player.vy = Math.min(player.vy,14);
+  player.y += player.vy;
+  player.grounded=false;
+
+  // Move floating platforms.
+  for(const p of platforms) {
+    if(p.moving) {
+      p.phase += 0.025;
+      p.y = p.baseY + Math.sin(p.phase)*48;
     }
-  </script>
+    if(player.vy>=0 &&
+       oldBottom<=p.y+8 &&
+       player.y+player.h>=p.y &&
+       player.x+player.w>p.x &&
+       player.x<p.x+p.w) {
+      player.y=p.y-player.h;
+      player.vy=0;
+      player.grounded=true;
+    }
+  }
+
+  for(const c of coins) {
+    if(!c.got && overlap(player,{x:c.x-12,y:c.y-12,w:24,h:24})) {
+      c.got=true; totalCoins++; updateHUD();
+    }
+  }
+
+  for(const e of enemies) {
+    e.x += e.v;
+    if(e.x<e.min || e.x>e.max) e.v *= -1;
+    const enemyBox={x:e.x,y:e.y,w:30,h:28};
+    if(overlap(player,enemyBox)) {
+      if(player.vy>1 && player.y+player.h<e.y+18) {
+        e.x=-1000; player.vy=-8; totalCoins+=2; updateHUD();
+      } else loseLife();
+    }
+  }
+
+  if(player.y>H+100) loseLife();
+
+  if(player.x+player.w>goal.x && player.y+player.h>goal.y-65) {
+    if(stage<3) {
+      makeLevel(stage+1);
+    } else {
+      won=true;
+      message.textContent="🏆 You saved the Sky Islands! Tap ↻ to play again.";
+    }
+  }
+
+  camera = Math.max(0,Math.min(player.x-W*0.35, 2380-W));
+}
+
+function roundRect(x,y,w,h,r,color) {
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.roundRect(x,y,w,h,r);
+  ctx.fill();
+}
+
+function drawCloud(x,y,s) {
+  ctx.fillStyle="rgba(255,255,255,.8)";
+  ctx.beginPath();
+  ctx.arc(x,y,22*s,0,Math.PI*2);
+  ctx.arc(x+24*s,y-12*s,28*s,0,Math.PI*2);
+  ctx.arc(x+52*s,y,21*s,0,Math.PI*2);
+  ctx.fill();
+}
+
+function draw() {
+  const sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#54bdf7");
+  sky.addColorStop(1,"#d1f5ff");
+  ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+
+  // Distant scenery.
+  for(let i=0;i<7;i++) {
+    const x=((i*210-camera*.18)%(W+220)+W+220)%(W+220)-100;
+    drawCloud(x,75+(i%3)*65,0.8+(i%2)*.35);
+  }
+  ctx.fillStyle="#8bd5b1";
+  ctx.beginPath(); ctx.moveTo(0,430);
+  for(let x=0;x<=W+20;x+=20)
+    ctx.lineTo(x,390+Math.sin((x+camera*.12)*.012)*25);
+  ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.fill();
+
+  ctx.save();
+  ctx.translate(-camera,0);
+
+  // Platforms.
+  for(const p of platforms) {
+    roundRect(p.x,p.y,p.w,p.h,8,"#8b583b");
+    roundRect(p.x,p.y,p.w,11,6,p.moving?"#ffe16c":"#42d66b");
+    for(let x=p.x+14;x<p.x+p.w-8;x+=30) {
+      ctx.fillStyle="#32b95a";
+      ctx.fillRect(x,p.y+2,8,4);
+    }
+  }
+
+  // Coins.
+  for(const c of coins) if(!c.got) {
+    const bob=Math.sin(performance.now()/220+c.bob)*4;
+    ctx.fillStyle="#ffb700";
+    ctx.beginPath();ctx.ellipse(c.x,c.y+bob,10,13,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#fff19b";ctx.lineWidth=3;ctx.stroke();
+    ctx.fillStyle="#fff5b4";ctx.fillRect(c.x-2,c.y-6+bob,4,12);
+  }
+
+  // Enemies.
+  for(const e of enemies) if(e.x>-500) {
+    roundRect(e.x,e.y,30,25,12,"#9256ee");
+    ctx.fillStyle="white";
+    ctx.beginPath();ctx.arc(e.x+9,e.y+10,4,0,7);ctx.arc(e.x+21,e.y+10,4,0,7);ctx.fill();
+    ctx.fillStyle="#342050";
+    ctx.fillRect(e.x+8,e.y+9,3,5);ctx.fillRect(e.x+20,e.y+9,3,5);
+    ctx.fillStyle="#7141c2";
+    ctx.fillRect(e.x+5,e.y+23,7,4);ctx.fillRect(e.x+19,e.y+23,7,4);
+  }
+
+  // Goal flag.
+  ctx.fillStyle="#f8fafc";ctx.fillRect(goal.x,goal.y-70,6,72);
+  ctx.fillStyle="#28dc77";
+  ctx.beginPath();ctx.moveTo(goal.x+6,goal.y-68);
+  ctx.lineTo(goal.x+52,goal.y-54);
+  ctx.lineTo(goal.x+6,goal.y-39);ctx.fill();
+
+  // Player with blinking damage protection.
+  if(invincible===0 || Math.floor(invincible/6)%2===0) {
+    const x=player.x,y=player.y;
+    roundRect(x,y+9,player.w,player.h-9,9,"#ff923f");
+    roundRect(x+3,y,player.w-6,19,8,"#ffb85c");
+    // Backpack
+    roundRect(x+(player.face===1?-5:player.w-3),y+18,9,17,4,"#3679ff");
+    // Eyes
+    ctx.fillStyle="white";
+    ctx.beginPath();
+    ctx.arc(x+10,y+10,5,0,7);ctx.arc(x+21,y+10,5,0,7);ctx.fill();
+    ctx.fillStyle="#26304e";
+    ctx.beginPath();
+    ctx.arc(x+10+player.face*2,y+11,2,0,7);
+    ctx.arc(x+21+player.face*2,y+11,2,0,7);ctx.fill();
+    ctx.fillStyle="#53372d";
+    ctx.fillRect(x+7,y+35,7,7);ctx.fillRect(x+19,y+35,7,7);
+  }
+
+  ctx.restore();
+
+  if(won || gameOver) {
+    ctx.fillStyle="rgba(10,25,60,.65)";
+    ctx.fillRect(0,0,W,H);
+    ctx.textAlign="center";
+    ctx.fillStyle="#fff";
+    ctx.font="bold 43px system-ui";
+    ctx.fillText(won?"YOU WIN!":"GAME OVER",W/2,H/2-15);
+    ctx.font="22px system-ui";
+    ctx.fillText(won?"The Sky Islands are safe!":"Tap ↻ to restart",W/2,H/2+30);
+  }
+}
+
+function loop(time) {
+  // Avoid huge jumps when Safari pauses the game.
+  const dt=Math.min((time-last)/16.67||1,2);
+  last=time;
+  // Physics is tuned for normal frame rates.
+  if(dt>0) update();
+  draw();
+  requestAnimationFrame(loop);
+}
+makeLevel(1);
+requestAnimationFrame(loop);
+</script>
 </body>
 </html>
-    
