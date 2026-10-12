@@ -1,0 +1,40 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My iPad Game</title>
+  <style>
+    body {
+      background: #172554;
+      color: white;
+      font-family: sans-serif;
+      text-align: center;
+      padding: 30px 12px;
+    }
+    button {
+      font-size: 22px;
+      padding: 16px 24px;
+      border: 0;
+      border-radius: 12px;
+      background: #38bdf8;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎮 My First Game</h1>
+  <p id="score">Score: 0</p>
+  <button onclick="scoreUp()">Tap to Score!</button>
+
+  <script>
+    let score = 0;
+
+    function scoreUp() {
+      score++;
+      document.getElementById("score").textContent =
+        "Score: " + score;
+    }
+  </script>
+</body>
+</html>
+    
